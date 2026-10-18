@@ -283,6 +283,7 @@ async function dbDel(id){ const db=await openDB(); return new Promise((res,rej)=
 /* ========= STATE ========= */
 let currentBook=null; let currentTab='reading';
 let lastScroll=0; let toolbarHidden=false;
+let currentScrollHandler=null;
 const FONTS=[
   {id:'noto', name:'본명조 · Noto Serif', family:'"Noto Serif KR", serif'},
   {id:'gowun', name:'고운바탕', family:'"Gowun Batang", serif'},
@@ -504,13 +505,17 @@ function renderBook(book){
     }
     wrap.appendChild(sec);
   }
-  // restore position
+  // restore position + progress bar 초기값
   requestAnimationFrame(()=>{
-    if(book.scrollTop>0){ window.scrollTo(0, book.scrollTop); }
-    else if(book.currentChapter){
-      const el=document.getElementById(book.currentChapter);
-      if(el) el.scrollIntoView({behavior:'auto'});
-    }
+    setTimeout(()=>{
+      if(book.scrollTop>0){ window.scrollTo(0, book.scrollTop); }
+      else if(book.currentChapter){
+        const el=document.getElementById(book.currentChapter);
+        if(el) el.scrollIntoView({behavior:'auto'});
+      }
+      const track=document.getElementById('progress-track');
+      if(track && book.progress) track.style.width=(book.progress*100)+'%';
+    },50);
   });
 }
 
@@ -665,13 +670,14 @@ function showView(id){
   document.getElementById(id).classList.add('active');
   window.scrollTo(0,0);
 }
-function openLibrary(){ showView('library-view'); renderLibrary(); }
-function openHome(){ showView('home-view'); }
+function openLibrary(){ closeReaderCleanup(); showView('library-view'); renderLibrary(); }
+function openHome(){ closeReaderCleanup(); showView('home-view'); }
 
 /* ========= READER OPEN ========= */
 async function openReader(id){
   const book=await dbGet(id);
   if(!book) return;
+  closeReaderCleanup();
   currentBook=book;
   showView('reader-view');
   // iPhone fix: ensure toolbar visible
@@ -683,8 +689,8 @@ async function openReader(id){
   // progress tracking
   const track=document.getElementById('progress-track');
   const onScroll=()=>{
-    const scrollY=window.scrollY;
-    const docH=document.documentElement.scrollHeight - window.innerHeight;
+    const scrollY=window.scrollY||window.pageYOffset||document.documentElement.scrollTop||0;
+    const docH=Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) - window.innerHeight;
     const pct=docH>0 ? Math.max(0,Math.min(1,scrollY/docH)) : 0;
     track.style.width=(pct*100)+'%';
     // auto-hide toolbar - iOS bounce 대응
@@ -699,28 +705,38 @@ async function openReader(id){
     if(currentBook){
       currentBook.progress=Math.min(0.999, pct);
       currentBook.scrollTop=scrollY;
-      // detect current chapter
       const secs=[...document.querySelectorAll('[data-chapter-id]')];
       let cur=null;
-      for(const s of secs){ if(s.getBoundingClientRect().top<=140) cur=s; }
+      for(const s of secs){ if(s.getBoundingClientRect().top<=160) cur=s; }
       if(cur) currentBook.currentChapter=cur.dataset.chapterId;
       if(pct>0.92) currentBook.finished=true;
       clearTimeout(currentBook._saveTimer);
       currentBook._saveTimer=setTimeout(async()=>{
-        currentBook.lastRead=Date.now();
-        await dbPut({...currentBook, _saveTimer:undefined});
-      },600);
+        try{
+          currentBook.lastRead=Date.now();
+          const toSave={...currentBook};
+          delete toSave._saveTimer;
+          delete toSave._onScroll;
+          await dbPut(toSave);
+        }catch(e){ console.error('progress save fail', e); }
+      },500);
     }
   };
+  currentScrollHandler=onScroll;
   window.addEventListener('scroll', onScroll, {passive:true});
-  // iPhone: 상단 탭하면 툴바 다시 표시
+  // iPhone: 상단 탭 + 본문 탭하면 툴바 다시 표시
+  const showToolbar=()=>{ if(toolbarHidden){ document.getElementById('reader-toolbar').classList.remove('hidden'); toolbarHidden=false; } };
   document.getElementById('reader-wrap').addEventListener('click', (e)=>{
-    if(e.clientY < 140 && toolbarHidden){ document.getElementById('reader-toolbar').classList.remove('hidden'); toolbarHidden=false; }
+    if(e.clientY < 220) showToolbar();
+    else if(toolbarHidden && e.target.closest('.p')) showToolbar();
   });
-  currentBook._onScroll=onScroll;
 }
 function closeReaderCleanup(){
-  if(currentBook && currentBook._onScroll) window.removeEventListener('scroll', currentBook._onScroll);
+  if(currentScrollHandler){ window.removeEventListener('scroll', currentScrollHandler); currentScrollHandler=null; }
+  if(currentBook){
+    delete currentBook._onScroll;
+    if(currentBook._saveTimer){ clearTimeout(currentBook._saveTimer); delete currentBook._saveTimer; }
+  }
 }
 
 /* ========= TOC ========= */
@@ -866,12 +882,19 @@ document.getElementById('tts-pause').addEventListener('click', pauseTTS);
 document.querySelectorAll('.tab').forEach(t=>{ t.addEventListener('click', ()=>{ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); currentTab=t.dataset.tab; renderLibrary(); }); });
 document.getElementById('book-grid').addEventListener('click', async e=>{
   const btn=e.target.closest('[data-act]');
-  if(!btn) return;
-  const id=btn.dataset.id;
-  if(btn.dataset.act==='del'){
-    if(confirm('서재에서 삭제할까요? 파일 원본은 유지됩니다.')){ await dbDel(id); renderLibrary(); }
-  }else if(btn.dataset.act==='read'){
-    openReader(id);
+  if(btn){
+    const id=btn.dataset.id;
+    if(btn.dataset.act==='del'){
+      if(confirm('서재에서 삭제할까요? 파일 원본은 유지됩니다.')){ await dbDel(id); renderLibrary(); }
+    }else if(btn.dataset.act==='read'){
+      openReader(id);
+    }
+    return;
+  }
+  const card=e.target.closest('.book-card');
+  if(card){
+    const bid=card.querySelector('[data-id]')?.dataset.id;
+    if(bid) openReader(bid);
   }
 });
 
