@@ -34,7 +34,7 @@ button{font-family:inherit;}
 .view{display:none; min-height:100dvh;}
 .view.active{display:flex; flex-direction:column;}
 /* HOME */
-#home-view{position:relative; align-items:center; justify-content:center; padding:48px 24px 40px; overflow:hidden;}
+#home-view{position:relative; align-items:center; justify-content:center; padding:calc(48px + env(safe-area-inset-top)) 24px calc(40px + env(safe-area-inset-bottom)); overflow:hidden;}
 .home-bg{position:absolute; inset:0; background: radial-gradient(120% 80% at 50% -10%, #fff 0%, var(--bg) 60%), radial-gradient(80% 60% at 100% 0%, #f0e9da 0%, transparent 60%); pointer-events:none;}
 [data-theme="dark"] .home-bg, [data-theme="black"] .home-bg{background: radial-gradient(120% 80% at 50% -10%, #232323 0%, var(--bg) 70%);}
 .home-header{text-align:center; z-index:1; margin-bottom:48px;}
@@ -49,7 +49,7 @@ button{font-family:inherit;}
 .home-foot{z-index:1; margin-top:56px; font-size:11px; letter-spacing:0.12em; color:var(--text2); text-align:center; line-height:1.6;}
 /* LIBRARY */
 #library-view{padding:0; background:var(--bg);}
-.lib-top{position:sticky; top:0; z-index:10; background:var(--bg); backdrop-filter:blur(20px); border-bottom:1px solid var(--line); padding:18px 20px 0;}
+.lib-top{position:sticky; top:0; z-index:10; background:var(--bg); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-bottom:1px solid var(--line); padding:calc(18px + env(safe-area-inset-top)) 20px 0 20px;}
 .lib-top h2{font-family:var(--font-serif); font-weight:300; font-size:28px; margin:0 0 18px; letter-spacing:-0.04em; display:flex; align-items:center; gap:12px;}
 .lib-tabs{display:flex; gap:20px; border-bottom:1px solid transparent;}
 .tab{appearance:none; background:none; border:none; padding:0 0 14px; font-size:13px; letter-spacing:0.06em; color:var(--text2); border-bottom:1.5px solid transparent; margin-bottom:-1px; cursor:pointer; transition:.2s;}
@@ -71,13 +71,13 @@ button{font-family:inherit;}
 .empty b{color:var(--text); font-family:var(--font-serif); font-weight:500;}
 /* READER */
 #reader-view{background:var(--paper); position:relative;}
-.toolbar{position:fixed; top:0; left:0; right:0; z-index:30; display:flex; align-items:center; justify-content:space-between; padding:12px 14px; background:color-mix(in srgb, var(--paper) 84%, transparent); backdrop-filter:blur(18px) saturate(1.2); border-bottom:1px solid var(--line); transition:transform .35s cubic-bezier(.2,.8,.2,1);}
+.toolbar{position:fixed; top:0; left:0; right:0; z-index:30; display:flex; align-items:center; justify-content:space-between; padding:12px 14px; padding-top:calc(12px + env(safe-area-inset-top)); background:rgba(255,255,255,0.88); background:color-mix(in srgb, var(--paper) 84%, transparent); backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2); border-bottom:1px solid var(--line); transition:transform .35s cubic-bezier(.2,.8,.2,1); transform:translateZ(0);}
 .toolbar.hidden{transform:translateY(-100%);}
 .toolbar .left,.toolbar .right{display:flex; gap:8px; align-items:center;}
 .t-icon{appearance:none; border:1px solid var(--line); background:var(--bg); width:38px; height:38px; border-radius:999px; display:grid; place-items:center; cursor:pointer; color:var(--text); transition:.2s;}
 .t-icon:hover{background:var(--text); color:var(--bg); border-color:var(--text);}
-.progress-track{position:fixed; top:0; left:0; height:2px; background:var(--text); z-index:40; width:0%; transition:width .1s linear;}
-.reader-wrap{width:100%; max-width:var(--max); margin:0 auto; padding:92px 22px 160px; }
+.progress-track{position:fixed; top:env(safe-area-inset-top); left:0; height:2px; background:var(--text); z-index:41; width:0%; transition:width .1s linear;}
+.reader-wrap{width:100%; max-width:var(--max); margin:0 auto; padding:calc(92px + env(safe-area-inset-top)) 22px calc(160px + env(safe-area-inset-bottom)); }
 .chapter-head{margin:56px 0 36px; padding:0 0 28px; border-bottom:1px solid var(--line); text-align:center;}
 .chapter-head .kicker{font-size:11px; letter-spacing:0.22em; color:var(--text2); text-transform:uppercase; margin-bottom:12px;}
 .chapter-head h2{font-family:var(--font-serif); font-weight:300; font-size:clamp(26px,5vw,38px); line-height:1.25; letter-spacing:-0.05em; margin:0; word-break:keep-all;}
@@ -432,11 +432,56 @@ function renderBook(book){
     const deco=document.createElement('div'); deco.className='deco';
     head.append(kicker,h2,deco);
     sec.appendChild(head);
-    // paragraphs
-    const paras = slice.split(/\n{2,}|\r\n{2,}/).map(p=>p.trim()).filter(Boolean);
+    // paragraphs - 스마트 분리: 이중개행 우선, 없으면 단일개행, 초장문은 문장 단위 분리
+    function smartSplitParagraphs(text){
+      text = text.replace(/\r/g,'');
+      let rawParas;
+      if(/\n\s*\n/.test(text)){
+        rawParas = text.split(/\n\s*\n+/).map(p=>p.trim()).filter(Boolean);
+        const expanded=[];
+        for(const p of rawParas){
+          if(p.length>1200 && !p.includes('\n')){
+            const sentences = p.split(/(?<=[.!?다요죠까…]\s+|”\s+|"\s+|\]\s+)/);
+            let buf='';
+            for(const s of sentences){
+              if((buf+' '+s).length>480){ if(buf) expanded.push(buf.trim()); buf=s; }
+              else buf = buf ? buf+' '+s : s;
+            }
+            if(buf) expanded.push(buf.trim());
+          }else if(p.includes('\n')){
+            const lines = p.split('\n').map(l=>l.trim()).filter(Boolean);
+            const avg = lines.reduce((a,b)=>a+b.length,0)/(lines.length||1);
+            if(avg < 220 && lines.length>1){
+              // 한국 txt는 한 줄이 한 문단인 경우가 많음
+              expanded.push(...lines);
+            }else{
+              expanded.push(p.replace(/\n+/g,' ').trim());
+            }
+          }else{
+            expanded.push(p);
+          }
+        }
+        return expanded;
+      }else{
+        // 단일 개행만 있는 파일 - 각 줄을 문단으로
+        let lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+        if(lines.length===1 && lines[0].length>600){
+          const sents = lines[0].split(/(?<=[.!?다요]\s+|”\s*|"\s+|。\s*)/);
+          const out=[]; let buf='';
+          for(const s of sents){
+            if((buf+' '+s).length>460){ if(buf) out.push(buf.trim()); buf=s; }
+            else buf = buf ? buf+' '+s : s;
+          }
+          if(buf) out.push(buf.trim());
+          return out;
+        }
+        return lines;
+      }
+    }
+    const paras = smartSplitParagraphs(slice);
     // skip first line if it's same as title to avoid duplication
     let startIdx=0;
-    if(paras[0] && paras[0].slice(0,80).includes(chapters[i].title.slice(0,20))) startIdx=1;
+    if(paras[0] && chapters[i].title && paras[0].slice(0,80).includes(chapters[i].title.slice(0,20))) startIdx=1;
     for(let j=startIdx;j<paras.length;j++){
       let raw=paras[j];
       // clean: if raw equals chapter title line, skip
@@ -629,6 +674,10 @@ async function openReader(id){
   if(!book) return;
   currentBook=book;
   showView('reader-view');
+  // iPhone fix: ensure toolbar visible
+  const tb=document.getElementById('reader-toolbar');
+  tb.classList.remove('hidden');
+  toolbarHidden=false; lastScroll=0;
   renderBook(book);
   renderTOC(book);
   // progress tracking
@@ -636,12 +685,13 @@ async function openReader(id){
   const onScroll=()=>{
     const scrollY=window.scrollY;
     const docH=document.documentElement.scrollHeight - window.innerHeight;
-    const pct=docH>0 ? scrollY/docH : 0;
+    const pct=docH>0 ? Math.max(0,Math.min(1,scrollY/docH)) : 0;
     track.style.width=(pct*100)+'%';
-    // auto-hide toolbar
-    if(scrollY>lastScroll && scrollY>120){
+    // auto-hide toolbar - iOS bounce 대응
+    if(scrollY<0) return;
+    if(scrollY>lastScroll && scrollY>140){
       if(!toolbarHidden){ document.getElementById('reader-toolbar').classList.add('hidden'); toolbarHidden=true; }
-    }else{
+    }else if(scrollY < lastScroll - 8 || scrollY <= 140){
       if(toolbarHidden){ document.getElementById('reader-toolbar').classList.remove('hidden'); toolbarHidden=false; }
     }
     lastScroll=scrollY;
@@ -663,6 +713,10 @@ async function openReader(id){
     }
   };
   window.addEventListener('scroll', onScroll, {passive:true});
+  // iPhone: 상단 탭하면 툴바 다시 표시
+  document.getElementById('reader-wrap').addEventListener('click', (e)=>{
+    if(e.clientY < 140 && toolbarHidden){ document.getElementById('reader-toolbar').classList.remove('hidden'); toolbarHidden=false; }
+  });
   currentBook._onScroll=onScroll;
 }
 function closeReaderCleanup(){
