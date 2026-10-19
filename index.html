@@ -64,7 +64,7 @@ button{font-family:inherit;}
 .book-info{font-size:11px; color:var(--text2); margin-top:4px; display:flex; gap:7px;}
 .progress-bar{height:2px; background:var(--bg2); border-radius:999px; margin-top:8px; overflow:hidden;}
 .progress-fill{height:100%; background:var(--text); width:0%;}
-.book-actions{display:flex; gap:6px; margin-left:auto; align-items:flex-start; flex-shrink:0;}
+.book-actions{display:flex; gap:6px; margin-left:auto; align-items:flex-start; flex-shrink:0; position:relative; z-index:2;}
 .icon-btn{appearance:none; border:1px solid var(--line); background:var(--paper); width:32px; height:32px; border-radius:10px; display:grid; place-items:center; cursor:pointer; color:var(--text2); transition:.18s;}
 .icon-btn:hover{border-color:var(--text); color:var(--text);}
 .icon-btn.del{border-color:var(--line); color:var(--text2);} .icon-btn.del:hover{border-color:#e85d3f; color:#e85d3f; background:#fff5f2;}
@@ -111,6 +111,7 @@ button{font-family:inherit;}
 #tts-bar button{appearance:none; border:none; background:rgba(255,255,255,.12); color:inherit; width:28px; height:28px; border-radius:999px; display:grid; place-items:center; cursor:pointer;}
 #paste-modal{position:fixed; inset:0; z-index:120; display:none; align-items:center; justify-content:center; padding:20px;}
 #paste-modal.open{display:flex;}
+#del-modal.open{display:flex;}
 #paste-modal .bg{position:absolute; inset:0; background:rgba(0,0,0,.22); backdrop-filter:blur(14px);}
 .modal-box{position:relative; background:var(--paper); border:1px solid var(--line); border-radius:16px; width:100%; max-width:480px; box-shadow:var(--shadow); padding:16px; max-height:86vh; display:flex; flex-direction:column;}
 .modal-box h3{font-family:var(--font-display); font-style:italic; font-size:17px; margin:0 0 8px;}
@@ -284,40 +285,73 @@ let pendingDelId=null;
 function showDelConfirm(id, title){
   pendingDelId=id;
   const m=document.getElementById('del-modal');
-  document.getElementById('del-modal-title').textContent=title||'이 책을 삭제할까요?';
-  m.classList.add('open');
-  m.style.display='flex';
+  const t=document.getElementById('del-modal-title');
+  if(t) t.textContent=title||'이 책을 삭제할까요?';
+  if(m){ m.classList.add('open'); m.style.display='flex'; }
 }
 function hideDelConfirm(){
   pendingDelId=null;
   const m=document.getElementById('del-modal');
-  m.classList.remove('open');
-  m.style.display='none';
+  if(m){ m.classList.remove('open'); m.style.display='none'; }
 }
 
-document.getElementById('book-grid').addEventListener('click', async e=>{
-  const btn=e.target.closest('[data-act]');
-  if(btn){
-    const id=btn.dataset.id;
-    if(btn.dataset.act==='del'){
-      e.stopPropagation();
-      const b=await dbGet(id);
-      showDelConfirm(id, b?`'${b.title}'을(를) 삭제할까요?`:'삭제할까요?');
-    }else if(btn.dataset.act==='read'){
-      openReader(id);
+// Delegated click for library - robust version
+const bookGridEl = document.getElementById('book-grid');
+if(bookGridEl){
+  bookGridEl.addEventListener('click', async (e)=>{
+    const btn = e.target.closest('button[data-act]');
+    if(btn){
+      const id = btn.dataset.id;
+      if(!id) return;
+      if(btn.dataset.act==='del'){
+        e.preventDefault();
+        e.stopPropagation();
+        try{
+          const b = await dbGet(id);
+          showDelConfirm(id, b?`'${b.title}' 삭제할까요?`:'삭제할까요?');
+        }catch(err){
+          console.error(err);
+          if(confirm('삭제할까요?')){ await dbDel(id); await renderLibrary(); }
+        }
+        return;
+      }
+      if(btn.dataset.act==='read'){
+        e.preventDefault();
+        e.stopPropagation();
+        openReader(id);
+        return;
+      }
     }
-    return;
-  }
-  const card=e.target.closest('.book-card');
-  if(card){
-    const bid=card.querySelector('[data-id]')?.dataset.id;
-    if(bid) openReader(bid);
-  }
-});
+    const card = e.target.closest('.book-card');
+    if(card){
+      const firstBtn = card.querySelector('button[data-id]');
+      const bid = firstBtn ? firstBtn.dataset.id : null;
+      if(bid) openReader(bid);
+    }
+  });
+}
 const delModal=document.getElementById('del-modal');
-delModal.querySelector('.bg').addEventListener('click', hideDelConfirm);
-document.getElementById('del-cancel').addEventListener('click', hideDelConfirm);
-document.getElementById('del-confirm').addEventListener('click', async()=>{ if(pendingDelId){ await dbDel(pendingDelId); renderLibrary(); } hideDelConfirm(); });
+if(delModal){
+  const bg = delModal.querySelector('.bg');
+  if(bg) bg.addEventListener('click', hideDelConfirm);
+  const cancelBtn = document.getElementById('del-cancel');
+  if(cancelBtn) cancelBtn.addEventListener('click', hideDelConfirm);
+  const confirmBtn = document.getElementById('del-confirm');
+  if(confirmBtn) confirmBtn.addEventListener('click', async()=>{
+    try{
+      if(pendingDelId){
+        await dbDel(pendingDelId);
+        await renderLibrary();
+      }
+    }catch(err){ console.error(err); alert('삭제 실패: '+err); }
+    hideDelConfirm();
+  });
+}
+// Fallback: double-check direct onclick for delete buttons (for iOS)
+window.deleteBook = async function(id){
+  const b = await dbGet(id);
+  showDelConfirm(id, b?`'${b.title}' 삭제할까요?`:'삭제할까요?');
+};
 
 const pasteModal=document.getElementById('paste-modal');
 document.getElementById('btn-paste-text').addEventListener('click',()=>{ pasteModal.classList.add('open'); });
