@@ -1,4 +1,4 @@
-const CACHE='yeobaek-v15-delete-fix';
+const CACHE='yeobaek-v16-overflow-fix';
 const CORE=['./','./index.html'];
 self.addEventListener('install',e=>{
   e.waitUntil(
