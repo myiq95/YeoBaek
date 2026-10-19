@@ -1,27 +1,6 @@
 <!DOCTYPE html>
 <html lang="ko">
-<head><style>
-@font-face {
-  font-family: "Optimistic";
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url("/fonts/OptimisticAI_VF_Optimized.woff2") format("woff2");
-}
-@font-face {
-  font-family: "Optimistic Mono";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("/fonts/OptimisticMono_W_TextRegular.woff2") format("woff2");
-}
-:where(html) {
-  font-family: "Optimistic", system-ui, sans-serif;
-}
-:where(code, pre, kbd, samp) {
-  font-family: "Optimistic Mono", ui-monospace, monospace;
-}
-</style>
+<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -88,10 +67,10 @@ button{font-family:inherit;}
 .book-actions{display:flex; gap:6px; margin-left:auto; align-items:flex-start; flex-shrink:0;}
 .icon-btn{appearance:none; border:1px solid var(--line); background:var(--paper); width:32px; height:32px; border-radius:10px; display:grid; place-items:center; cursor:pointer; color:var(--text2); transition:.18s;}
 .icon-btn:hover{border-color:var(--text); color:var(--text);}
-.icon-btn.del:hover{border-color:#e85d3f; color:#e85d3f; background:#fff5f2;}
-.book-card.swipe-del{transform:translateX(-56px);}
-.book-card-wrap{position:relative; overflow:hidden; border-radius:16px;}
-.book-card-wrap .del-bg{position:absolute; inset:0; background:#e85d3f; display:flex; align-items:center; justify-content:flex-end; padding-right:16px; color:#fff; font-size:12px; font-weight:500; border-radius:16px;}
+.icon-btn.del{border-color:var(--line); color:var(--text2);} .icon-btn.del:hover{border-color:#e85d3f; color:#e85d3f; background:#fff5f2;}
+.book-card-wrap{position:relative; border-radius:16px;}
+.book-card-wrap .del-bg{display:none;}
+.book-card.swipe-del{transform:none;}
 #reader-view{background:var(--paper); position:relative; min-height:100dvh;}
 .toolbar{position:fixed; left:0; right:0; z-index:100; top:0; min-height:calc(38px + env(safe-area-inset-top)); padding-top:max(2px, calc(env(safe-area-inset-top) - 10px)); padding-bottom:4px; display:flex; align-items:center; justify-content:space-between; padding-left:8px; padding-right:8px; background:color-mix(in srgb, var(--paper) 88%, transparent); backdrop-filter:blur(20px) saturate(1.1); -webkit-backdrop-filter:blur(20px) saturate(1.1); border-bottom:1px solid color-mix(in srgb, var(--line) 55%, transparent); transition:transform .3s cubic-bezier(.2,.8,.2,1);}
 .toolbar.hidden{transform:translateY(-100%);}
@@ -225,7 +204,40 @@ async function parseDocxFile(file){const buf=await file.arrayBuffer(); const zip
 async function parsePdfFile(file){const buf=await file.arrayBuffer(); const pdf=await pdfjsLib.getDocument({data:buf}).promise; let full=''; for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i); const content=await page.getTextContent(); let lastY=null; let pageText=''; for(const item of content.items){ if(lastY!==null && Math.abs(item.transform[5]-lastY)>5) pageText+='\n'; pageText+=item.str+(item.hasEOL?'\n':' '); lastY=item.transform[5]; } full+=pageText+'\n\n'; if(i%5===0) await new Promise(r=>setTimeout(r,0)); } return full;}
 async function parseEpubFile(file){const buf=await file.arrayBuffer(); const zip=await JSZip.loadAsync(buf); const container=zip.file('META-INF/container.xml'); if(!container) throw new Error('epub 없음'); const cXml=await container.async('string'); const parser=new DOMParser(); const cDoc=parser.parseFromString(cXml,'application/xml'); const rootfile=cDoc.querySelector('rootfile'); const opfPath=rootfile.getAttribute('full-path'); const opfDir=opfPath.includes('/')?opfPath.slice(0,opfPath.lastIndexOf('/')+1):''; const opfFile=zip.file(opfPath); const opfXml=await opfFile.async('string'); const opfDoc=parser.parseFromString(opfXml,'application/xml'); const map={}; opfDoc.querySelectorAll('manifest item').forEach(el=>{map[el.getAttribute('id')]=opfDir+el.getAttribute('href');}); const spine=[]; opfDoc.querySelectorAll('spine itemref').forEach(el=>{const id=el.getAttribute('idref'); if(map[id]) spine.push(map[id]);}); let full=''; for(const href of spine){const f=zip.file(href); if(!f) continue; const html=await f.async('string'); const doc=parser.parseFromString(html,'text/html'); full+='\n\n'+(doc.body.innerText||'')+'\n\n';} return full;}
 async function addBookFromText(text,titleHint){const title=(titleHint||text.slice(0,80).split('\n')[0].trim().slice(0,40)||'무제').replace(/[#<>]/g,''); const chapters=detectChapters(text); const book={id:'b_'+Date.now()+'_'+Math.random().toString(36).slice(2,6), title, content:text, chapters, created:Date.now(), lastRead:Date.now(), progress:0, scrollTop:0, currentChapter:chapters[0]?.id||null, finished:false, length:text.length}; await dbPut(book); await renderLibrary(); openReader(book.id);}
-async function renderLibrary(){const grid=document.getElementById('book-grid'); const all=await dbGetAll(); all.sort((a,b)=>b.lastRead-a.lastRead); document.getElementById('lib-count').textContent=all.length?`${all.length}`:''; let filtered=all; if(currentTab==='reading') filtered=all.filter(b=>!b.finished); else if(currentTab==='finished') filtered=all.filter(b=>b.finished); if(filtered.length===0){grid.innerHTML=`<div class="empty"><b>서재가 비어 있어요</b><br>파일을 열거나 텍스트를 붙여넣어보세요.</div>`; return;} grid.innerHTML=''; for(const b of filtered){const wrap=document.createElement('div'); wrap.className='book-card-wrap'; const card=document.createElement('div'); card.className='book-card'; const pct=Math.round((b.progress||0)*100); card.innerHTML=`<div class="book-cover">${escapeHtml(b.title[0]||'여')}</div><div class="book-meta"><div class="book-title">${escapeHtml(b.title)}</div><div class="book-info"><span>${(b.length||0).toLocaleString()}자</span><span>${pct}%</span><span>${b.finished?'완독':'읽는 중'}</span></div><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div></div><div class="book-actions"><button class="icon-btn" data-act="read" data-id="${b.id}" title="읽기"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg></button><button class="icon-btn del" data-act="del" data-id="${b.id}" title="삭제"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button></div>`; const delBg=document.createElement('div'); delBg.className='del-bg'; delBg.innerHTML=`<button class="del-confirm" data-del-id="${b.id}" style="appearance:none;background:none;border:none;color:#fff;font-size:13px;font-weight:600;cursor:pointer;padding:8px 12px;">삭제</button>`; wrap.appendChild(delBg); wrap.appendChild(card); grid.appendChild(wrap);} }
+async function renderLibrary(){
+  const grid=document.getElementById('book-grid');
+  const all=await dbGetAll();
+  all.sort((a,b)=>b.lastRead-a.lastRead);
+  document.getElementById('lib-count').textContent=all.length?`${all.length}`:'';
+  let filtered=all;
+  if(currentTab==='reading') filtered=all.filter(b=>!b.finished);
+  else if(currentTab==='finished') filtered=all.filter(b=>b.finished);
+  if(filtered.length===0){
+    grid.innerHTML=`<div class="empty"><b>서재가 비어 있어요</b><br>파일을 열거나 텍스트를 붙여넣어보세요.</div>`;
+    return;
+  }
+  grid.innerHTML='';
+  for(const b of filtered){
+    const card=document.createElement('div');
+    card.className='book-card';
+    const pct=Math.round((b.progress||0)*100);
+    card.innerHTML=`<div class="book-cover">${escapeHtml(b.title[0]||'여')}</div>
+      <div class="book-meta">
+        <div class="book-title">${escapeHtml(b.title)}</div>
+        <div class="book-info"><span>${(b.length||0).toLocaleString()}자</span><span>${pct}%</span><span>${b.finished?'완독':'읽는 중'}</span></div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+      </div>
+      <div class="book-actions">
+        <button class="icon-btn" data-act="read" data-id="${b.id}" title="읽기">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </button>
+        <button class="icon-btn del" data-act="del" data-id="${b.id}" title="삭제">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        </button>
+      </div>`;
+    grid.appendChild(card);
+  }
+}
 function showView(id){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active')); document.getElementById(id).classList.add('active'); window.scrollTo(0,0);}
 function openLibrary(){closeReaderCleanup(); showView('library-view'); renderLibrary();}
 function openHome(){closeReaderCleanup(); showView('home-view');}
@@ -268,55 +280,39 @@ document.getElementById('r-tts').addEventListener('click',startTTS);
 document.getElementById('tts-stop').addEventListener('click',stopTTS);
 document.getElementById('tts-pause').addEventListener('click',pauseTTS);
 document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); currentTab=t.dataset.tab; renderLibrary();});});
-// delete confirm modal
 let pendingDelId=null;
 function showDelConfirm(id, title){
   pendingDelId=id;
   const m=document.getElementById('del-modal');
   document.getElementById('del-modal-title').textContent=title||'이 책을 삭제할까요?';
   m.classList.add('open');
+  m.style.display='flex';
 }
-function hideDelConfirm(){ pendingDelId=null; document.getElementById('del-modal').classList.remove('open'); }
+function hideDelConfirm(){
+  pendingDelId=null;
+  const m=document.getElementById('del-modal');
+  m.classList.remove('open');
+  m.style.display='none';
+}
 
 document.getElementById('book-grid').addEventListener('click', async e=>{
-  const delConfirmBtn=e.target.closest('[data-del-id]');
-  if(delConfirmBtn){ const id=delConfirmBtn.dataset.delId; if(id){ await dbDel(id); renderLibrary(); } return; }
-  const btn=e.target.closest('[data-act]'); 
+  const btn=e.target.closest('[data-act]');
   if(btn){
-    const id=btn.dataset.id; 
-    if(btn.dataset.act==='del'){ 
-      const b=await dbGet(id); 
-      showDelConfirm(id, b?`'${b.title}'을(를) 삭제할까요?`:'삭제할까요?'); 
-    } else if(btn.dataset.act==='read'){ openReader(id); } 
+    const id=btn.dataset.id;
+    if(btn.dataset.act==='del'){
+      e.stopPropagation();
+      const b=await dbGet(id);
+      showDelConfirm(id, b?`'${b.title}'을(를) 삭제할까요?`:'삭제할까요?');
+    }else if(btn.dataset.act==='read'){
+      openReader(id);
+    }
     return;
-  } 
-  const card=e.target.closest('.book-card'); 
-  if(card){ 
-    const bid=card.querySelector('[data-id]')?.dataset.id; 
-    if(bid) openReader(bid); 
   }
-});
-// swipe to reveal delete
-let swipeStartX=0, swipeCard=null;
-document.getElementById('book-grid').addEventListener('touchstart', e=>{
   const card=e.target.closest('.book-card');
-  if(!card) return;
-  swipeStartX=e.touches[0].clientX;
-  swipeCard=card;
-}, {passive:true});
-document.getElementById('book-grid').addEventListener('touchmove', e=>{
-  if(!swipeCard) return;
-  const dx=e.touches[0].clientX - swipeStartX;
-  if(dx<-20){ swipeCard.classList.add('swipe-del'); }
-  if(dx>20){ swipeCard.classList.remove('swipe-del'); }
-}, {passive:true});
-document.getElementById('book-grid').addEventListener('touchend', ()=>{ swipeCard=null; });
-document.getElementById('book-grid').addEventListener('contextmenu', async e=>{
-  const card=e.target.closest('.book-card');
-  if(!card) return;
-  e.preventDefault();
-  const bid=card.querySelector('[data-id]')?.dataset.id;
-  if(bid){ const b=await dbGet(bid); showDelConfirm(bid, b?`'${b.title}'을(를) 삭제할까요?`:'삭제할까요?'); }
+  if(card){
+    const bid=card.querySelector('[data-id]')?.dataset.id;
+    if(bid) openReader(bid);
+  }
 });
 const delModal=document.getElementById('del-modal');
 delModal.querySelector('.bg').addEventListener('click', hideDelConfirm);
@@ -332,5 +328,5 @@ fileInput.addEventListener('change', async e=>{const file=e.target.files[0]; if(
 ['dragenter','dragover'].forEach(ev=>{window.addEventListener(ev, e=>{e.preventDefault();});}); window.addEventListener('drop', async e=>{e.preventDefault(); const f=e.dataTransfer.files[0]; if(!f) return; fileInput.files=e.dataTransfer.files; fileInput.dispatchEvent(new Event('change'));});
 initSettingsUI(); populateVoices(); renderLibrary();
 </script>
-<script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body>
+</body>
 </html>
