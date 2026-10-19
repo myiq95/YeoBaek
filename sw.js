@@ -1,4 +1,4 @@
-const CACHE='yeobaek-v10-premium';
+const CACHE='yeobaek-v11-yeobaek';
 const CORE=['./'];
 self.addEventListener('install',e=>{
   e.waitUntil(
